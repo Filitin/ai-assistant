@@ -54,13 +54,13 @@ def show_auto(title: str, message: str, timeout_ms: int = AUTO_TIMEOUT_MS) -> No
     msg_font = tkfont.Font(family="Segoe UI", size=9)
 
     tk.Label(win, text=title, font=title_font,
-             bg=BG_COLOR, fg=TITLE_COLOR, anchor="w",
-             padx=14, pady=(10, 2)).pack(fill="x")
+        bg=BG_COLOR, fg=TITLE_COLOR, anchor="w",
+        padx=14, pady=8).pack(fill="x")
 
     tk.Label(win, text=message, font=msg_font,
-             bg=BG_COLOR, fg=TEXT_COLOR, anchor="w",
-             padx=14, pady=(0, 10), wraplength=BANNER_WIDTH - 28,
-             justify="left").pack(fill="x")
+         bg=BG_COLOR, fg=TEXT_COLOR, anchor="w",
+         padx=14, pady=4, wraplength=BANNER_WIDTH - 28,
+         justify="left").pack(fill="x")
 
     # Progress bar that shrinks over timeout_ms
     bar_frame = tk.Frame(win, bg=BG_COLOR)
@@ -107,13 +107,13 @@ def show_confirm(title: str, message: str, item_id: int | None = None) -> None:
     btn_font = tkfont.Font(family="Segoe UI", size=9, weight="bold")
 
     tk.Label(win, text=title, font=title_font,
-             bg=BG_COLOR, fg=TITLE_COLOR, anchor="w",
-             padx=14, pady=(10, 2)).pack(fill="x")
+        bg=BG_COLOR, fg=TITLE_COLOR, anchor="w",
+        padx=14, pady=8).pack(fill="x")
 
     tk.Label(win, text=message, font=msg_font,
-             bg=BG_COLOR, fg=TEXT_COLOR, anchor="w",
-             padx=14, pady=(0, 8), wraplength=BANNER_WIDTH - 28,
-             justify="left").pack(fill="x")
+        bg=BG_COLOR, fg=TEXT_COLOR, anchor="w",
+        padx=14, pady=4, wraplength=BANNER_WIDTH - 28,
+        justify="left").pack(fill="x")
 
     btn_frame = tk.Frame(win, bg=BG_COLOR)
     btn_frame.pack(fill="x", padx=14, pady=(0, 12))
