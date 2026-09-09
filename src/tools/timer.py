@@ -1,9 +1,4 @@
 # src/tools/timer.py
-"""
-Non-blocking countdown timer.
-Fires a banner notification via src.notify when complete.
-"""
-
 import subprocess
 import sys
 import threading
@@ -26,21 +21,32 @@ def _run_timer(seconds: int, label: str) -> None:
     )
 
 
-def set_timer(minutes: int, label: str = "Timer done") -> str:
+def set_timer(minutes: int = 0, seconds: int = 0, label: str = "Timer done") -> str:
     """
-    Start a non-blocking countdown timer.
-    Shows a banner notification when complete.
-    minutes: duration in minutes (1-180).
-    label: what to show in the notification banner.
+    Start a non-blocking countdown timer. Fires a banner notification when complete.
+    Provide minutes, seconds, or both. Examples: minutes=1, seconds=30, minutes=1 seconds=30.
+    Minimum duration is 5 seconds. Maximum is 180 minutes.
+    label: short description shown in the notification.
     """
-    if not (1 <= minutes <= 180):
-        raise ValueError(f"minutes must be between 1 and 180, got: {minutes}")
+    total_seconds = minutes * 60 + seconds
+    if total_seconds < 5:
+        raise ValueError(f"Timer duration must be at least 5 seconds, got: {total_seconds}s")
+    if total_seconds > 180 * 60:
+        raise ValueError(f"Timer duration cannot exceed 180 minutes.")
 
-    seconds = minutes * 60
     thread = threading.Thread(
         target=_run_timer,
-        args=(seconds, label),
+        args=(total_seconds, label),
         daemon=True,
     )
     thread.start()
-    return f"Timer set for {minutes} minute(s). Will notify when done."
+
+    # Human-readable confirmation
+    if minutes > 0 and seconds > 0:
+        duration_str = f"{minutes} min {seconds} sec"
+    elif minutes > 0:
+        duration_str = f"{minutes} minute(s)"
+    else:
+        duration_str = f"{seconds} second(s)"
+
+    return f"Timer set for {duration_str}. Will notify when done."
