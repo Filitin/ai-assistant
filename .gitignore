@@ -1,0 +1,17 @@
+data/assistant.db
+__pycache__/
+*.py[cod]
+*.pyo
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store
+.env
+*.env
+secrets.py

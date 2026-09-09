@@ -1,0 +1,5 @@
+* text=auto
+*.py text encoding=utf-8
+*.md text encoding=utf-8
+*.sql text encoding=utf-8
+*.txt text encoding=utf-8
