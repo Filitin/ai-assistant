@@ -32,3 +32,10 @@ CREATE TABLE IF NOT EXISTS sessions (
     ended_at TEXT,
     summary TEXT
 );
+
+-- Simple key/value store for user preferences (e.g. default weather location).
+-- Value holds an opaque string; JSON is fine when a preference has structure.
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);

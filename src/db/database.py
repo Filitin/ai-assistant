@@ -208,6 +208,32 @@ def get_last_session_summary() -> str | None:
     return row["summary"] if row else None
 
 
+# ---------------------------------------------------------------------------
+# Settings (key/value store for user preferences)
+# ---------------------------------------------------------------------------
+
+def get_setting(key: str, default: str | None = None) -> str | None:
+    """Return the stored value for `key`, or `default` if it isn't set."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT value FROM settings WHERE key = ?", (key,)
+    ).fetchone()
+    conn.close()
+    return row["value"] if row else default
+
+
+def set_setting(key: str, value: str) -> None:
+    """Insert or update the value stored for `key` (UPSERT)."""
+    conn = get_connection()
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (key, value),
+    )
+    conn.commit()
+    conn.close()
+
+
 if __name__ == "__main__":
     init_db()
     print(f"Database initialized: {DB_PATH}")

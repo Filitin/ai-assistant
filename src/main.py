@@ -18,6 +18,7 @@ import ollama
 
 from src.logging_config import setup_logging
 from src.tools.timer import set_timer
+from src.tools.weather import get_weather, set_weather_location
 from src.db.database import (
     init_db,
     add_item,
@@ -72,6 +73,8 @@ available_functions = {
     "volume_down": volume_down,
     "set_mute": set_mute,
     "get_mute": get_mute,
+    "get_weather": get_weather,
+    "set_weather_location": set_weather_location,
 }
 
 # Single source of truth for the model's tool set. Deriving the list from the
@@ -96,9 +99,13 @@ TOOLS = list(available_functions.values())
 EPHEMERAL_TOOLS = frozenset({
     "set_volume", "get_volume", "change_volume", "volume_up", "volume_down",
     "set_mute", "get_mute", "switch_audio_device", "set_timer",
+    # A weather forecast is transient info — no value reloading it into context.
+    "get_weather",
 })
 DURABLE_TOOLS = frozenset({
     "add_item", "list_items", "update_item_status", "touch_last_accessed",
+    # Changing the default weather city is a saved preference — worth keeping.
+    "set_weather_location",
 })
 
 
