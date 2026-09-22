@@ -131,6 +131,15 @@ def save_messages(session_id: str, messages: list[dict]) -> None:
     Each dict must have 'role' and 'content' keys.
     tool_name is optional (used for role='tool' entries).
     Skips system messages — those are reconstructed fresh every run.
+
+    Durability note (Phase 0.5, Task B): transient action-only turns (e.g. a
+    lone volume/audio command) are already filtered out UPSTREAM in
+    handle_turn — they are never appended to the `new_messages` list this
+    function receives. Filtering there, rather than here, keeps this layer a
+    dumb writer and avoids tagging the live `messages` dicts that are handed to
+    ollama.chat. So every message reaching this function is persist-worthy;
+    the only rows dropped here are structural (system messages and the
+    content=None tool-call envelopes).
     """
     conn = get_connection()
     now = datetime.now(timezone.utc).isoformat()

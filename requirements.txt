@@ -1,0 +1,11 @@
+# Personal AI Assistant — direct dependencies (Python 3.10, Windows 11)
+# Pinned to the versions currently installed in the working environment.
+#
+# Standard-library modules in use (no install needed): sqlite3, tkinter,
+# subprocess, ctypes, winreg, winsound, argparse, pathlib, datetime.
+
+ollama==0.6.2        # local LLM client (gemma4-assistant via Ollama) + tool-calling loop
+pycaw==20251023      # Core Audio / WASAPI — master volume + mute (src/tools/audio.py)
+comtypes==1.4.16     # COM bridge that pycaw needs; imported directly for CoInitialize
+pystray==0.19.5      # system tray icon (src/tray.py)
+pillow==12.2.0       # tray icon rendering — PIL.Image / ImageDraw (src/tray.py)

@@ -7,12 +7,12 @@ Called via subprocess from src/tools/timer.py:
 
 import argparse
 import math
-import subprocess
 import sys
 import tkinter as tk
 from tkinter import font as tkfont
 from pathlib import Path
 import winreg
+import winsound
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 
@@ -23,7 +23,7 @@ LIGHT = {
     "bg_card":      "#e8e8e8",
     "text":         "#1a1a1a",
     "subtext":      "#6a6a6a",
-    "accent":       "#8860d0",   # purple like Clock app
+    "accent":       "#8860d0",
     "accent_dim":   "#d0c0ef",
     "track":        "#d0d0d0",
     "btn_bg":       "#e0e0e0",
@@ -36,7 +36,7 @@ DARK = {
     "bg_card":      "#2a2a2a",
     "text":         "#ffffff",
     "subtext":      "#999999",
-    "accent":       "#c084fc",   # purple
+    "accent":       "#c084fc",
     "accent_dim":   "#4a3060",
     "track":        "#3a3a3a",
     "btn_bg":       "#333333",
@@ -58,14 +58,14 @@ def _get_theme() -> dict:
         return DARK
 
 
-# ── Geometry helpers ─────────────────────────────────────────────────────────
+# ── Geometry ──────────────────────────────────────────────────────────────────
 
-WIN_W = 300
-WIN_H = 380
+WIN_W       = 300
+WIN_H       = 380
 CANVAS_SIZE = 220
-RING_OUTER = 100   # radius outer edge of ring
-RING_INNER = 78    # radius inner edge (ring thickness = 22px)
-CENTER = CANVAS_SIZE // 2
+RING_OUTER  = 100
+RING_INNER  = 82
+CENTER      = CANVAS_SIZE // 2
 
 
 def _center_window(win: tk.Tk) -> None:
@@ -77,49 +77,44 @@ def _center_window(win: tk.Tk) -> None:
     win.geometry(f"{WIN_W}x{WIN_H}+{x}+{y}")
 
 
-# ── Arc drawing ───────────────────────────────────────────────────────────────
+# ── Tick-mark ring ────────────────────────────────────────────────────────────
 
 def _draw_arc(canvas: tk.Canvas, fraction: float, color: str, track_color: str) -> None:
     """
-    Draw a circular progress ring.
-    fraction: 1.0 = full, 0.0 = empty. Starts at top, goes clockwise.
+    Draw tick-mark style progress ring (60 ticks, like Windows 11 Clock app).
+    fraction: 1.0 = full, 0.0 = empty. Clockwise from top.
     """
     canvas.delete("arc")
-    pad = CENTER - RING_OUTER
 
-    # Background track (full circle)
-    canvas.create_arc(
-        pad, pad, CANVAS_SIZE - pad, CANVAS_SIZE - pad,
-        start=90, extent=359.99,
-        style="arc",
-        outline=track_color,
-        width=RING_OUTER - RING_INNER,
-        tags="arc",
-    )
+    TICK_COUNT       = 60
+    TICK_OUTER       = RING_OUTER
+    TICK_INNER       = RING_INNER
+    TICK_MAJOR_INNER = RING_INNER - 6   # longer every 5 ticks
 
-    # Foreground progress
-    if fraction > 0.001:
-        extent = fraction * 359.99
-        canvas.create_arc(
-            pad, pad, CANVAS_SIZE - pad, CANVAS_SIZE - pad,
-            start=90, extent=-extent,   # negative = clockwise
-            style="arc",
-            outline=color,
-            width=RING_OUTER - RING_INNER,
-            tags="arc",
-        )
+    for i in range(TICK_COUNT):
+        angle_deg = 90 - (i / TICK_COUNT) * 360
+        angle_rad = math.radians(angle_deg)
 
-    # End cap dot
-    if fraction > 0.001:
-        angle_rad = math.radians(90 - extent)
-        r_mid = (RING_OUTER + RING_INNER) / 2
-        dot_x = CENTER + r_mid * math.cos(angle_rad)
-        dot_y = CENTER - r_mid * math.sin(angle_rad)
-        dot_r = (RING_OUTER - RING_INNER) / 2
-        canvas.create_oval(
-            dot_x - dot_r, dot_y - dot_r,
-            dot_x + dot_r, dot_y + dot_r,
-            fill=color, outline="", tags="arc",
+        cos_a = math.cos(angle_rad)
+        sin_a = math.sin(angle_rad)
+
+        is_major  = (i % 5 == 0)
+        inner_r   = TICK_MAJOR_INNER if is_major else TICK_INNER
+        width     = 2 if is_major else 1
+
+        x1 = CENTER + TICK_OUTER * cos_a
+        y1 = CENTER - TICK_OUTER * sin_a
+        x2 = CENTER + inner_r  * cos_a
+        y2 = CENTER - inner_r  * sin_a
+
+        # Ticks within the progress fraction get accent color
+        tick_fraction = 1.0 - (i / TICK_COUNT)
+        fill = color if tick_fraction <= fraction else track_color
+
+        canvas.create_line(
+            x1, y1, x2, y2,
+            fill=fill, width=width,
+            capstyle="round", tags="arc",
         )
 
 
@@ -129,14 +124,16 @@ def _round_btn(parent: tk.Widget, text: str, t: dict,
                size: int, command, is_accent: bool = False) -> tk.Button:
     bg = t["accent"] if is_accent else t["btn_bg"]
     fg = "#000000" if is_accent else t["btn_fg"]
-    btn = tk.Button(
-        parent, text=text, font=tkfont.Font(family="Segoe UI", size=size),
-        bg=bg, fg=fg, activebackground=t["btn_hover"],
-        activeforeground=fg, relief="flat", bd=0,
+    return tk.Button(
+        parent, text=text,
+        font=tkfont.Font(family="Segoe UI", size=size),
+        bg=bg, fg=fg,
+        activebackground=t["btn_hover"],
+        activeforeground=fg,
+        relief="flat", bd=0,
         cursor="hand2", width=3, height=1,
         command=command,
     )
-    return btn
 
 
 # ── Main window ───────────────────────────────────────────────────────────────
@@ -151,41 +148,40 @@ def run_timer(total_seconds: int, label: str) -> None:
     win.resizable(False, False)
     _center_window(win)
 
-    # Try to set window icon programmatically (suppress error if no icon)
     try:
         win.iconbitmap(default="")
     except Exception:
         pass
 
     # ── State ──────────────────────────────────────────────────────────────
-    remaining   = [total_seconds]
-    paused      = [False]
-    finished    = [False]
-    after_id    = [None]
+    remaining = [total_seconds]
+    paused    = [False]
+    finished  = [False]
+    after_id  = [None]
 
-    # ── Label at top ───────────────────────────────────────────────────────
-    lbl_font  = tkfont.Font(family="Segoe UI", size=11)
-    time_font = tkfont.Font(family="Segoe UI Light", size=26, weight="bold")
-    sub_font  = tkfont.Font(family="Segoe UI", size=9)
+    # ── Fonts ───────────────────────────────────────────────────────────────
+    lbl_font  = tkfont.Font(family="Segoe UI",       size=11)
+    time_font = tkfont.Font(family="Segoe UI Light",  size=26, weight="bold")
 
+    # ── Label ───────────────────────────────────────────────────────────────
     tk.Label(win, text=label, font=lbl_font,
              bg=t["bg"], fg=t["subtext"]).pack(pady=(20, 0))
 
-    # ── Canvas ring ────────────────────────────────────────────────────────
+    # ── Canvas ──────────────────────────────────────────────────────────────
     canvas = tk.Canvas(win, width=CANVAS_SIZE, height=CANVAS_SIZE,
                        bg=t["bg"], highlightthickness=0)
     canvas.pack(pady=(6, 0))
 
-    # Time text inside ring
+    # Time text — updated via itemconfig, NOT textvariable
     canvas.create_text(
         CENTER, CENTER,
         text="",
         font=time_font,
         fill=t["text"],
         tags="time_text",
-    )   
+    )
 
-    # ── Buttons ────────────────────────────────────────────────────────────
+    # ── Buttons ─────────────────────────────────────────────────────────────
     btn_frame = tk.Frame(win, bg=t["bg"])
     btn_frame.pack(pady=16)
 
@@ -208,7 +204,7 @@ def run_timer(total_seconds: int, label: str) -> None:
                             command=_cancel, is_accent=False)
     cancel_btn.pack(side="left", padx=10, ipadx=8, ipady=6)
 
-    # ── Tick function ───────────────────────────────────────────────────────
+    # ── Helpers ─────────────────────────────────────────────────────────────
     def _fmt(secs: int) -> str:
         m, s = divmod(secs, 60)
         h, m = divmod(m, 60)
@@ -216,6 +212,7 @@ def run_timer(total_seconds: int, label: str) -> None:
             return f"{h}:{m:02d}:{s:02d}"
         return f"{m:02d}:{s:02d}"
 
+    # ── Tick ────────────────────────────────────────────────────────────────
     def _tick() -> None:
         if finished[0]:
             return
@@ -234,24 +231,14 @@ def run_timer(total_seconds: int, label: str) -> None:
         after_id[0] = win.after(1000, _tick)
 
     def _on_finish() -> None:
+        # Alert sound on completion — same two-tone as the confirm banner in notify.py.
+        winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)
         pause_btn.config(state="disabled")
+        cancel_btn.config(text="✕")
         _draw_arc(canvas, 0.0, t["accent"], t["track"])
         canvas.itemconfig("time_text", text="Done!")
 
-        # Fire banner notification
-        subprocess.Popen(
-            [
-                sys.executable, "-m", "src.notify",
-                "--title", "Timer complete",
-                "--message", label,
-                "--mode", "auto",
-            ],
-            cwd=PROJECT_ROOT,
-        )
-        # Close timer window after 3 seconds
-        win.after(3000, win.destroy)
-
-    # ── Init ───────────────────────────────────────────────────────────────
+    # ── Init ────────────────────────────────────────────────────────────────
     canvas.itemconfig("time_text", text=_fmt(total_seconds))
     _draw_arc(canvas, 1.0, t["accent"], t["track"])
     after_id[0] = win.after(1000, _tick)

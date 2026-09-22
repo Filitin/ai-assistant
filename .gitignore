@@ -15,3 +15,9 @@ desktop.ini
 .env
 *.env
 secrets.py
+
+# Runtime logs (Phase 0.5) — rotated on disk, never versioned.
+logs/
+
+# Local model weights — large binaries, fetched/quantized locally, not tracked.
+models/
