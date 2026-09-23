@@ -1,26 +1,24 @@
-"""Погодный инструмент на базе Open-Meteo (бесплатный API, без ключа).
+"""Weather tool backed by Open-Meteo (free API, no key).
 
-Экспонирует две функции-инструмента для модели:
-- get_weather        — прогноз (сегодня / завтра / неделя) с температурой,
-                       осадками, ветром, влажностью и предупреждением о
-                       серьёзных явлениях (гроза, шторм, сильный снег);
-- set_weather_location — сохранить город по умолчанию в общем хранилище (SQLite).
+Tool functions exposed to the model:
+- get_weather          — forecast (today / tomorrow / week): temperature,
+                         precipitation, wind, humidity, and a warning for severe
+                         conditions (thunderstorm, storm, heavy snow);
+- set_weather_location — save the default city in shared storage (SQLite).
 
-Дизайн (см. ADR фазы 5):
-- Геокодинг города — бесплатный keyless-эндпоинт Open-Meteo.
-- Один запрос прогноза сразу на 7 дней; нужный срез выбирается локально.
-- Локация по умолчанию хранится в таблице settings (ключ "weather_location")
-  как JSON {name, lat, lon}. Координаты кэшируются, чтобы не геокодировать
-  сохранённый город при каждом запросе. Изначально — Миссиссога.
-- Серьёзные предупреждения выводятся эвристически из WMO-кода и порывов ветра.
-  Это НЕ официальные штормовые предупреждения гидрометслужбы — у бесплатного
-  Open-Meteo их нет.
-- Все ожидаемые сбои (нет сети, город не найден) возвращаются дружелюбной
-  строкой, а не исключением: choke point в handle_turn ловит raise, но для
-  ОЖИДАЕМЫХ ошибок мы отдаём понятный текст, который модель озвучит.
+Design (see Phase 5 ADR):
+- City geocoding uses Open-Meteo's free keyless endpoint.
+- One forecast request covers 7 days; the needed slice is picked locally.
+- The default location lives in the settings table (key "weather_location")
+  as JSON {name, lat, lon}. Coordinates are cached so the saved city isn't
+  geocoded on every request. Initially Mississauga.
+- Severe warnings are derived heuristically from the WMO code and wind gusts.
+  They are NOT official weather-service warnings — free Open-Meteo has none.
+- All expected failures (no network, city not found) return a friendly string
+  instead of raising: the handle_turn choke point catches raises, but for
+  EXPECTED errors we return clear text the model can voice.
 
-Возвращаемые строки — на русском; модель сама переформулирует / переведёт
-ответ на язык пользователя (RU/UK/EN).
+Return strings are English; the model replies in the user's language (RU/UK/EN).
 """
 
 from __future__ import annotations
@@ -31,68 +29,68 @@ import requests
 
 from src.db.database import get_setting, set_setting
 
-# --- Константы --------------------------------------------------------------
+# --- Constants --------------------------------------------------------------
 
 _GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
 _FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
-_TIMEOUT = 10  # секунд на HTTP-запрос
+_TIMEOUT = 10  # seconds per HTTP request
 
-# Ключ в таблице settings, под которым лежит JSON локации по умолчанию.
+# settings-table key holding the default location JSON.
 _LOCATION_KEY = "weather_location"
 
-# Локация по умолчанию — Миссиссога, Онтарио (пока пользователь не задал свою).
+# Default location — Mississauga, Ontario (until the user sets their own).
 _DEFAULT_LOCATION = {"name": "Mississauga", "lat": 43.5890, "lon": -79.6441}
 
-# Порог порывов ветра (км/ч), при котором добавляем предупреждение о шторме.
+# Wind gust threshold (km/h) that adds a storm warning.
 _WIND_GUST_ALERT_KMH = 70.0
 
-# WMO weather code -> (описание, серьёзное_явление)
-# https://open-meteo.com/en/docs  (раздел "Weather variable documentation")
+# WMO weather code -> (description, is_severe)
+# https://open-meteo.com/en/docs  ("Weather variable documentation" section)
 WMO_CODES: dict[int, tuple[str, bool]] = {
-    0: ("ясно", False),
-    1: ("преимущественно ясно", False),
-    2: ("переменная облачность", False),
-    3: ("пасмурно", False),
-    45: ("туман", False),
-    48: ("изморозь", False),
-    51: ("слабая морось", False),
-    53: ("морось", False),
-    55: ("сильная морось", False),
-    56: ("ледяная морось", True),
-    57: ("сильная ледяная морось", True),
-    61: ("небольшой дождь", False),
-    63: ("дождь", False),
-    65: ("сильный дождь", True),
-    66: ("ледяной дождь", True),
-    67: ("сильный ледяной дождь", True),
-    71: ("небольшой снег", False),
-    73: ("снег", False),
-    75: ("сильный снегопад", True),
-    77: ("снежная крупа", False),
-    80: ("кратковременный дождь", False),
-    81: ("ливень", False),
-    82: ("сильный ливень", True),
-    85: ("снежные заряды", False),
-    86: ("сильные снежные заряды", True),
-    95: ("гроза", True),
-    96: ("гроза с градом", True),
-    99: ("сильная гроза с градом", True),
+    0: ("clear sky", False),
+    1: ("mainly clear", False),
+    2: ("partly cloudy", False),
+    3: ("overcast", False),
+    45: ("fog", False),
+    48: ("depositing rime fog", False),
+    51: ("light drizzle", False),
+    53: ("drizzle", False),
+    55: ("dense drizzle", False),
+    56: ("freezing drizzle", True),
+    57: ("dense freezing drizzle", True),
+    61: ("light rain", False),
+    63: ("rain", False),
+    65: ("heavy rain", True),
+    66: ("freezing rain", True),
+    67: ("heavy freezing rain", True),
+    71: ("light snow", False),
+    73: ("snow", False),
+    75: ("heavy snowfall", True),
+    77: ("snow grains", False),
+    80: ("rain showers", False),
+    81: ("heavy showers", False),
+    82: ("violent rain showers", True),
+    85: ("snow showers", False),
+    86: ("heavy snow showers", True),
+    95: ("thunderstorm", True),
+    96: ("thunderstorm with hail", True),
+    99: ("severe thunderstorm with hail", True),
 }
 
 
 def _describe_code(code: int | None) -> tuple[str, bool]:
-    """Вернуть (описание, серьёзное) по WMO-коду; неизвестный код — нейтрально."""
+    """Return (description, is_severe) for a WMO code; unknown code -> neutral."""
     if code is None:
-        return ("нет данных", False)
-    return WMO_CODES.get(int(code), (f"код погоды {code}", False))
+        return ("no data", False)
+    return WMO_CODES.get(int(code), (f"weather code {code}", False))
 
 
-# --- Сетевые вызовы ---------------------------------------------------------
+# --- Network calls ----------------------------------------------------------
 
 
 def _geocode(city: str) -> dict | None:
-    """Найти координаты города. None — если город не найден."""
-    params = {"name": city, "count": 1, "language": "ru", "format": "json"}
+    """Find a city's coordinates. None if the city isn't found."""
+    params = {"name": city, "count": 1, "language": "en", "format": "json"}
     resp = requests.get(_GEOCODE_URL, params=params, timeout=_TIMEOUT)
     resp.raise_for_status()
     results = resp.json().get("results")
@@ -108,7 +106,7 @@ def _geocode(city: str) -> dict | None:
 
 
 def _fetch_forecast(lat: float, lon: float) -> dict:
-    """Запросить прогноз на 7 дней + текущие условия одним вызовом."""
+    """Fetch a 7-day forecast + current conditions in one call."""
     params = {
         "latitude": lat,
         "longitude": lon,
@@ -141,11 +139,11 @@ def _fetch_forecast(lat: float, lon: float) -> dict:
     return resp.json()
 
 
-# --- Локация по умолчанию (через общее хранилище) ---------------------------
+# --- Default location (shared storage) --------------------------------------
 
 
 def _load_default_location() -> dict:
-    """Прочитать сохранённую локацию из settings; иначе — Миссиссога."""
+    """Read the saved location from settings; otherwise Mississauga."""
     raw = get_setting(_LOCATION_KEY)
     if raw:
         try:
@@ -153,18 +151,18 @@ def _load_default_location() -> dict:
             if {"name", "lat", "lon"} <= loc.keys():
                 return loc
         except (ValueError, AttributeError):
-            pass  # повреждённое значение — тихо откатываемся к дефолту
+            pass  # corrupted value — silently fall back to the default
     return _DEFAULT_LOCATION
 
 
-# --- Обработка данных -------------------------------------------------------
+# --- Data processing --------------------------------------------------------
 
 
 def _daily_humidity_means(data: dict) -> dict[str, float]:
-    """Средняя относительная влажность по датам из почасовых данных.
+    """Mean relative humidity per date, from hourly data.
 
-    В суточном API Open-Meteo нет агрегата влажности, поэтому усредняем
-    почасовые значения relative_humidity_2m по каждой дате.
+    Open-Meteo's daily API has no humidity aggregate, so hourly
+    relative_humidity_2m values are averaged per date.
     """
     hourly = data.get("hourly", {})
     times = hourly.get("time", [])
@@ -188,20 +186,20 @@ def _fmt_temp(value: float | None) -> str:
 
 
 def _alert_for(code: int | None, gust_kmh: float | None) -> str | None:
-    """Строка предупреждения, если явление серьёзное или сильные порывы."""
+    """Warning line if the condition is severe or gusts are strong."""
     reasons: list[str] = []
     desc, severe = _describe_code(code)
     if severe:
         reasons.append(desc)
     if gust_kmh is not None and gust_kmh >= _WIND_GUST_ALERT_KMH:
-        reasons.append(f"порывы ветра до {round(gust_kmh)} км/ч")
+        reasons.append(f"wind gusts up to {round(gust_kmh)} km/h")
     if not reasons:
         return None
-    return "⚠️ Внимание: " + ", ".join(reasons)
+    return "WARNING: " + ", ".join(reasons)
 
 
 def _format_one_day(data: dict, idx: int, hum_means: dict[str, float]) -> str:
-    """Одна строка прогноза для дня с индексом idx (0=сегодня)."""
+    """One forecast line for the day at index idx (0 = today)."""
     daily = data["daily"]
     day_str = daily["time"][idx]
     code = daily["weather_code"][idx]
@@ -215,14 +213,14 @@ def _format_one_day(data: dict, idx: int, hum_means: dict[str, float]) -> str:
 
     parts = [
         desc,
-        f"днём {_fmt_temp(tmax)}, ночью {_fmt_temp(tmin)}",
-        f"осадки {round(precip)}%" if precip is not None else "осадки н/д",
-        f"ветер до {round(wind)} км/ч" if wind is not None else "ветер н/д",
+        f"high {_fmt_temp(tmax)}, low {_fmt_temp(tmin)}",
+        f"precipitation {round(precip)}%" if precip is not None else "precipitation n/a",
+        f"wind up to {round(wind)} km/h" if wind is not None else "wind n/a",
     ]
     if gust is not None:
-        parts[-1] += f" (порывы {round(gust)} км/ч)"
+        parts[-1] += f" (gusts {round(gust)} km/h)"
     if hum is not None:
-        parts.append(f"влажность ~{round(hum)}%")
+        parts.append(f"humidity ~{round(hum)}%")
 
     line = f"{day_str}: " + ", ".join(parts)
     alert = _alert_for(code, gust)
@@ -231,22 +229,21 @@ def _format_one_day(data: dict, idx: int, hum_means: dict[str, float]) -> str:
     return line
 
 
-# --- Публичные функции-инструменты ------------------------------------------
+# --- Public tool functions --------------------------------------------------
 
 
 def get_weather(day: str = "today", location: str | None = None) -> str:
-    """Узнать прогноз погоды: температура (°C), вероятность осадков, ветер,
-    влажность и предупреждение о серьёзных явлениях (гроза, шторм, сильный снег).
+    """Get the weather forecast: temperature (°C), precipitation chance, wind,
+    humidity, and a warning for severe conditions (thunderstorm, storm, heavy snow).
 
-    Используй для любых вопросов о погоде на любом языке: «какая погода
-    сегодня», «яка погода завтра», "what's the weather tomorrow", «погода в
-    Киеве», «прогноз на неделю».
+    Use for any weather question in any language: "what's the weather
+    tomorrow", «какая погода сегодня», «яка погода завтра», «погода в Киеве»,
+    «прогноз на неделю».
 
-    day: "today" (сегодня, по умолчанию), "tomorrow" (завтра) или "week"
-        (сводка на 7 дней).
-    location: название города, например "Kyiv", "London" — для разового
-        прогноза в другом городе. НЕ указывай, чтобы использовать сохранённую
-        локацию по умолчанию (изначально Миссиссога).
+    day: "today" (default), "tomorrow", or "week" (7-day summary).
+    location: city name, e.g. "Kyiv", "London" — for a one-off forecast in
+        another city. OMIT it to use the saved default location
+        (initially Mississauga).
     """
     day_norm = (day or "today").strip().lower()
 
@@ -254,14 +251,14 @@ def get_weather(day: str = "today", location: str | None = None) -> str:
         if location and location.strip():
             loc = _geocode(location.strip())
             if loc is None:
-                return f"Не удалось найти локацию «{location}»."
+                return f"Could not find location '{location}'."
         else:
             loc = _load_default_location()
         data = _fetch_forecast(loc["lat"], loc["lon"])
     except requests.exceptions.RequestException:
-        return "Сейчас не могу получить данные о погоде — сервис недоступен."
+        return "Can't get weather data right now — the service is unavailable."
     except (KeyError, ValueError, TypeError):
-        return "Сервис погоды вернул неожиданный ответ, попробуйте позже."
+        return "The weather service returned an unexpected response, try again later."
 
     hum_means = _daily_humidity_means(data)
     name = loc["name"]
@@ -269,44 +266,44 @@ def get_weather(day: str = "today", location: str | None = None) -> str:
 
     if day_norm in ("week", "7day", "7-day", "7 day", "неделя"):
         lines = [_format_one_day(data, i, hum_means) for i in range(n_days)]
-        return f"Погода в {name} на 7 дней:\n" + "\n".join(lines)
+        return f"7-day weather for {name}:\n" + "\n".join(lines)
 
     if day_norm in ("tomorrow", "завтра"):
-        idx, label = 1, "завтра"
-    else:  # today / сегодня / всё прочее
-        idx, label = 0, "сегодня"
+        idx, label = 1, "tomorrow"
+    else:  # today / сегодня / anything else
+        idx, label = 0, "today"
 
-    if idx >= n_days:  # защита, если API вернул меньше дней, чем ожидалось
-        return "Сервис погоды вернул неполные данные, попробуйте позже."
+    if idx >= n_days:  # guard: API returned fewer days than expected
+        return "The weather service returned incomplete data, try again later."
 
     body = _format_one_day(data, idx, hum_means)
-    _, _, rest = body.partition(": ")  # убираем ведущую дату для естественной фразы
-    return f"Погода в {name} на {label}: {rest}"
+    _, _, rest = body.partition(": ")  # drop the leading date for a natural phrase
+    return f"Weather in {name} {label}: {rest}"
 
 
 def set_weather_location(city: str) -> str:
-    """Сохранить город по умолчанию для прогноза погоды в общем хранилище.
+    """Save the default city for weather forecasts in shared storage.
 
-    Используй, когда пользователь просит запомнить или сменить свой город
-    погоды: «запомни мой город — Торонто», «сделай погоду по умолчанию для
-    Киева», "set my default weather city to London". Для разового прогноза в
-    другом городе это НЕ вызывай — просто передай location в get_weather.
+    Use when the user asks to remember or change their weather city:
+    "set my default weather city to London", «запомни мой город — Торонто»,
+    «зроби погоду за замовчуванням для Києва». Do NOT call this for a one-off
+    forecast in another city — just pass location to get_weather.
 
-    city: название города, например "Toronto", "Киев", "Львів".
+    city: city name, e.g. "Toronto", "Киев", "Львів".
     """
     if not city or not city.strip():
-        return "Не указан город."
+        return "No city specified."
     try:
         found = _geocode(city.strip())
     except requests.exceptions.RequestException:
-        return "Сейчас не могу проверить город — сервис недоступен."
+        return "Can't verify the city right now — the service is unavailable."
     if found is None:
-        return f"Не удалось найти локацию «{city}»."
+        return f"Could not find location '{city}'."
     set_setting(_LOCATION_KEY, json.dumps(found, ensure_ascii=False))
-    return f"Локация по умолчанию сохранена: {found['name']}."
+    return f"Default location saved: {found['name']}."
 
 
-# --- Ручной тест (офлайн-логика подменяется в тестах) -----------------------
+# --- Manual test (offline logic is mocked in tests) -------------------------
 
 if __name__ == "__main__":
     print(get_weather("today"))

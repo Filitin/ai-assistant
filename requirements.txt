@@ -10,3 +10,5 @@ comtypes==1.4.16     # COM bridge that pycaw needs; imported directly for CoInit
 pystray==0.19.5      # system tray icon (src/tray.py)
 pillow==12.2.0       # tray icon rendering — PIL.Image / ImageDraw (src/tray.py)
 requests==2.32.3     # HTTP client for Open-Meteo weather API (src/tools/weather.py)
+spotipy==2.24.0      # Spotify Web API wrapper — OAuth + playback control (src/tools/spotify.py)
+python-dotenv==1.0.1 # loads Spotify secrets from .env (src/tools/spotify.py)

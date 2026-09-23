@@ -19,6 +19,14 @@ import ollama
 from src.logging_config import setup_logging
 from src.tools.timer import set_timer
 from src.tools.weather import get_weather, set_weather_location
+from src.tools.spotify import (
+    spotify_play,
+    spotify_pause,
+    spotify_next,
+    spotify_previous,
+    spotify_play_track,
+    spotify_play_liked,
+)
 from src.db.database import (
     init_db,
     add_item,
@@ -75,6 +83,12 @@ available_functions = {
     "get_mute": get_mute,
     "get_weather": get_weather,
     "set_weather_location": set_weather_location,
+    "spotify_play": spotify_play,
+    "spotify_pause": spotify_pause,
+    "spotify_next": spotify_next,
+    "spotify_previous": spotify_previous,
+    "spotify_play_track": spotify_play_track,
+    "spotify_play_liked": spotify_play_liked,
 }
 
 # Single source of truth for the model's tool set. Deriving the list from the
@@ -101,6 +115,9 @@ EPHEMERAL_TOOLS = frozenset({
     "set_mute", "get_mute", "switch_audio_device", "set_timer",
     # A weather forecast is transient info — no value reloading it into context.
     "get_weather",
+    # Spotify playback controls are pure actions — nothing worth persisting.
+    "spotify_play", "spotify_pause", "spotify_next", "spotify_previous",
+    "spotify_play_track", "spotify_play_liked",
 })
 DURABLE_TOOLS = frozenset({
     "add_item", "list_items", "update_item_status", "touch_last_accessed",
@@ -207,7 +224,11 @@ def handle_turn(user_text: str, messages: list[dict], new_messages: list[dict]) 
 # ---------------------------------------------------------------------------
 
 last_summary = get_last_session_summary()
-system_content = f"Today's date: {today}. Use it as reference when user mentions a date without a year."
+system_content = (
+    f"Today's date: {today}. Use it as reference when user mentions a date without a year.\n"
+    "Always reply in the language of the user's latest message (Russian, Ukrainian "
+    "or English). Tool results are in English — translate them, don't switch language."
+)
 if last_summary:
     system_content += f"\n\nContext from your last session:\n{last_summary}"
 

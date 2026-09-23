@@ -15,9 +15,15 @@ desktop.ini
 .env
 *.env
 secrets.py
+Claude outputs/
+# Spotify OAuth token cache (Phase 6) — holds a refresh token, never versioned.
+.spotify_cache
 
 # Runtime logs (Phase 0.5) — rotated on disk, never versioned.
 logs/
 
 # Local model weights — large binaries, fetched/quantized locally, not tracked.
 models/
+
+# Local AI-agent context (AGENTS.md, generated CODEMAP.md) — never versioned.
+.agent/
